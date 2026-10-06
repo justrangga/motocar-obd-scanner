@@ -10,6 +10,12 @@ Aplikasi ini dirancang khusus agar **mudah digunakan oleh siapa saja tanpa perlu
 
 - ⚡ **Deteksi Otomatis Multi-Protokol (One-Click Connect):**
   Menguji protokol ECU secara berurutan (*CAN 11-bit 500k*, *K-Line KWP Fast*, *K-Line Slow ISO 9141*, *CAN 29-bit*, dan *KWP Custom*) dan langsung mengunci protokol yang merespon.
+- 🎯 **Arsitektur Backend Terinspirasi Torque Pro / Lite:**
+  - **PID Support Bitmasking (0100):** Membaca daftar sensor yang didukung ECU sebelum polling. Mencegah freeze atau delay pada ECU motor kecil yang tidak memiliki sensor mobil (seperti MAF/EGR).
+  - **Prioritized Adaptive Polling Queue:** Sensor cepat (RPM, Kecepatan, Throttle) diperbarui setiap siklus (responsif & halus), sedangkan sensor suhu dan voltase diperbarui secara berkala.
+  - **Mode 07 (Pending Fault Codes):** Mendeteksi gejala kerusakan dini sebelum lampu MIL Check Engine sempat menyala.
+  - **ISO-TP Multi-Frame Reassembly:** Mendukung reassembly frame CAN bus multiline sehingga tidak ada kode DTC yang terpotong.
+  - **Identifikasi Kendaraan (Mode 0902):** Membaca Nomor Rangka (VIN / Chassis Number) kendaraan secara otomatis.
 - 🛡️ **Toleran Terhadap Adapter Murah (ELM327 Clone Friendly):**
   Menggunakan *RFCOMM socket fallback* dan urutan inisialisasi yang fleksibel sehingga tidak terjadi error *"Bad Clone"* atau adapter macet.
 - 📊 **Live Dashboard Sensor Real-time:**

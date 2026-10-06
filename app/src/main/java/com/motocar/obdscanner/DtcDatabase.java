@@ -10,12 +10,21 @@ public class DtcDatabase {
         public final String title;
         public final String description;
         public final String severity; // Ringan, Sedang, Kritis
+        public boolean isPending = false;
 
         public DtcInfo(String code, String title, String description, String severity) {
             this.code = code;
             this.title = title;
             this.description = description;
             this.severity = severity;
+        }
+
+        public DtcInfo(String code, String title, String description, String severity, boolean isPending) {
+            this.code = code;
+            this.title = title;
+            this.description = description;
+            this.severity = severity;
+            this.isPending = isPending;
         }
     }
 
@@ -101,10 +110,16 @@ public class DtcDatabase {
     }
 
     public static DtcInfo lookup(String code) {
+        return lookup(code, false);
+    }
+
+    public static DtcInfo lookup(String code, boolean isPending) {
         if (code == null) return null;
         code = code.trim().toUpperCase();
         DtcInfo info = DB.get(code);
-        if (info != null) return info;
+        if (info != null) {
+            return new DtcInfo(info.code, info.title, info.description, info.severity, isPending);
+        }
 
         // Fallback generic interpretation based on standard OBD2 prefixes
         String category = "Kerusakan Komponen Kendaraan";
@@ -132,7 +147,8 @@ public class DtcDatabase {
             code,
             category,
             "Kode diagnostik OBD terdeteksi (" + code + "). Silakan periksa modul terkait sesuai buku servis.",
-            "Sedang"
+            "Sedang",
+            isPending
         );
     }
 }

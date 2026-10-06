@@ -59,6 +59,7 @@ public class MainActivity extends AppCompatActivity implements ObdManager.Connec
     private ImageButton btnRefreshDevices;
     private TextView tvChipInfo;
     private TextView tvActiveProto;
+    private TextView tvVinInfo;
     private TextView tvBatteryVoltInfo;
     private DeviceAdapter deviceAdapter;
 
@@ -179,6 +180,7 @@ public class MainActivity extends AppCompatActivity implements ObdManager.Connec
         btnRefreshDevices = findViewById(R.id.btn_refresh_devices);
         tvChipInfo = findViewById(R.id.tv_chip_info);
         tvActiveProto = findViewById(R.id.tv_active_proto);
+        tvVinInfo = findViewById(R.id.tv_vin_info);
         tvBatteryVoltInfo = findViewById(R.id.tv_battery_volt_info);
 
         ArrayAdapter<ObdProtocol> protoAdapter = new ArrayAdapter<>(
@@ -381,23 +383,23 @@ public class MainActivity extends AppCompatActivity implements ObdManager.Connec
 
         obdManager.readDtc(new ObdManager.DtcCallback() {
             @Override
-            public void onSuccess(List<String> dtcCodes) {
+            public void onSuccess(List<DtcDatabase.DtcInfo> dtcItems) {
                 pbDtcLoading.setVisibility(View.GONE);
                 btnScanDtc.setEnabled(true);
-                dtcAdapter.setDtcCodes(dtcCodes);
+                dtcAdapter.setDtcItems(dtcItems);
 
-                if (dtcCodes.isEmpty()) {
+                if (dtcItems.isEmpty()) {
                     ivDtcStatusIcon.setImageResource(R.drawable.ic_check_circle);
                     ivDtcStatusIcon.setColorFilter(ContextCompat.getColor(MainActivity.this, R.color.neon_green));
                     tvDtcStatusTitle.setText("Sistem ECU Normal");
-                    tvDtcStatusDesc.setText("Tidak ada kode kerusakan (DTC) aktif terdeteksi.");
+                    tvDtcStatusDesc.setText("Tidak ada kode kerusakan aktif maupun pending.");
                     Toast.makeText(MainActivity.this, "Scan Selesai: ECU Bersih, Tidak Ada Error!", Toast.LENGTH_SHORT).show();
                 } else {
                     ivDtcStatusIcon.setImageResource(R.drawable.ic_diagnostics);
                     ivDtcStatusIcon.setColorFilter(ContextCompat.getColor(MainActivity.this, R.color.neon_red));
-                    tvDtcStatusTitle.setText(dtcCodes.size() + " Kerusakan Terdeteksi!");
-                    tvDtcStatusDesc.setText("Periksa daftar kode kerusakan di bawah untuk penanganan.");
-                    Toast.makeText(MainActivity.this, "Ditemukan " + dtcCodes.size() + " kode error!", Toast.LENGTH_LONG).show();
+                    tvDtcStatusTitle.setText(dtcItems.size() + " Kerusakan Terdeteksi!");
+                    tvDtcStatusDesc.setText("Periksa daftar kode kerusakan di bawah (termasuk kode pending).");
+                    Toast.makeText(MainActivity.this, "Ditemukan " + dtcItems.size() + " kode error!", Toast.LENGTH_LONG).show();
                 }
             }
 
@@ -458,6 +460,7 @@ public class MainActivity extends AppCompatActivity implements ObdManager.Connec
                 btnHeaderDisconnect.setVisibility(View.GONE);
                 tvChipInfo.setText("Belum Terhubung");
                 tvActiveProto.setText("-");
+                tvVinInfo.setText("-");
                 break;
             case CONNECTING:
                 dotStatus.setBackgroundTintList(ContextCompat.getColorStateList(this, R.color.status_connecting));
@@ -470,6 +473,7 @@ public class MainActivity extends AppCompatActivity implements ObdManager.Connec
                 btnHeaderDisconnect.setVisibility(View.VISIBLE);
                 tvChipInfo.setText(obdManager.getElmVersion());
                 tvActiveProto.setText(obdManager.getActiveProtocolStr());
+                tvVinInfo.setText("-");
                 break;
             case CONNECTED_ECU:
                 dotStatus.setBackgroundTintList(ContextCompat.getColorStateList(this, R.color.status_connected));
@@ -477,6 +481,7 @@ public class MainActivity extends AppCompatActivity implements ObdManager.Connec
                 btnHeaderDisconnect.setVisibility(View.VISIBLE);
                 tvChipInfo.setText(obdManager.getElmVersion());
                 tvActiveProto.setText(obdManager.getActiveProtocolStr());
+                tvVinInfo.setText(obdManager.getVehicleVin());
                 break;
         }
         if (message != null && !message.isEmpty()) {

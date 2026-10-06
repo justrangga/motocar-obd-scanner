@@ -26,6 +26,14 @@ public class DtcAdapter extends RecyclerView.Adapter<DtcAdapter.ViewHolder> {
         notifyDataSetChanged();
     }
 
+    public void setDtcItems(List<DtcDatabase.DtcInfo> newItems) {
+        items.clear();
+        if (newItems != null) {
+            items.addAll(newItems);
+        }
+        notifyDataSetChanged();
+    }
+
     public void clear() {
         items.clear();
         notifyDataSetChanged();
@@ -45,9 +53,12 @@ public class DtcAdapter extends RecyclerView.Adapter<DtcAdapter.ViewHolder> {
         holder.tvCode.setText(info.code);
         holder.tvTitle.setText(info.title);
         holder.tvDesc.setText(info.description);
-        holder.tvSeverity.setText(info.severity);
+        String tag = info.isPending ? "Tertunda (Pending)" : info.severity;
+        holder.tvSeverity.setText(tag);
 
-        if ("Kritis".equalsIgnoreCase(info.severity)) {
+        if (info.isPending) {
+            holder.tvSeverity.setTextColor(ContextCompat.getColor(holder.itemView.getContext(), R.color.neon_amber));
+        } else if ("Kritis".equalsIgnoreCase(info.severity)) {
             holder.tvSeverity.setTextColor(ContextCompat.getColor(holder.itemView.getContext(), R.color.neon_red));
         } else if ("Sedang".equalsIgnoreCase(info.severity)) {
             holder.tvSeverity.setTextColor(ContextCompat.getColor(holder.itemView.getContext(), R.color.neon_amber));

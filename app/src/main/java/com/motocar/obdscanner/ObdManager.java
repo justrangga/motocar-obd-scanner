@@ -55,6 +55,8 @@ public class ObdManager {
     private String connectedDeviceAddress = "";
     private String elmVersion = "Unknown";
     private String activeProtocolStr = "AUTO";
+    private String vehicleVin = "-";
+    private final java.util.BitSet supportedPids = new java.util.BitSet(64);
 
     private Thread workerThread;
     private final AtomicBoolean isPollingActive = new AtomicBoolean(false);
@@ -87,6 +89,15 @@ public class ObdManager {
 
     public String getActiveProtocolStr() {
         return activeProtocolStr;
+    }
+
+    public String getVehicleVin() {
+        return vehicleVin;
+    }
+
+    public boolean isPidSupported(int pid) {
+        if (supportedPids.isEmpty()) return true;
+        return supportedPids.get(pid);
     }
 
     public void setProtocol(ObdProtocol protocol) {
@@ -274,6 +285,7 @@ public class ObdManager {
                         if (isEcuResponseValid(pingResp)) {
                             ecuFound = true;
                             activeProtocolStr = cand.name;
+                            parseSupportedPids(pingResp);
                             notifyState(ConnectionState.CONNECTED_ECU, "Terhubung: " + cand.label);
                             notifyLog(">>> BERHASIL TERHUBUNG DENGAN PROTOKOL: " + cand.name + " <<<", false);
                             break;
@@ -295,11 +307,19 @@ public class ObdManager {
                     if (isEcuResponseValid(ping)) {
                         ecuFound = true;
                         activeProtocolStr = currentProtocol.getDisplayName();
+                        parseSupportedPids(ping);
                         notifyState(ConnectionState.CONNECTED_ECU, "Terhubung ke ECU (" + activeProtocolStr + ")");
                     }
                 }
 
-                if (!ecuFound) {
+                if (ecuFound) {
+                    // Torque Lite feature: Read VIN (0902)
+                    try {
+                        Thread.sleep(120);
+                        String vinRaw = sendRawCommand("0902", 2500);
+                        parseVin(vinRaw);
+                    } catch (Exception ignored) {}
+                } else {
                     notifyState(ConnectionState.CONNECTED_ELM,
                             "Adapter OK! Kunci kontak wajib ON & saklar Run ON agar ECU merespon.");
                 }
@@ -399,51 +419,58 @@ public class ObdManager {
             int cycle = 0;
             while (isPollingActive.get() && socket != null && socket.isConnected()) {
                 try {
-                    // Query RPM (010C) - highest priority
-                    String rpmResp = sendRawCommand("010C", 800);
-                    parseRpm(rpmResp);
-
-                    // Query Speed (010D)
-                    String speedResp = sendRawCommand("010D", 800);
-                    parseSpeed(speedResp);
-
-                    // Query Throttle (0111)
-                    String tpsResp = sendRawCommand("0111", 800);
-                    parseThrottle(tpsResp);
-
-                    // Periodic sensors every 3 cycles
-                    if (cycle % 3 == 0) {
-                        // Coolant Temp (0105)
-                        String ectResp = sendRawCommand("0105", 800);
-                        parseCoolant(ectResp);
-
-                        // Engine Load (0104)
-                        String loadResp = sendRawCommand("0104", 800);
-                        parseEngineLoad(loadResp);
+                    // Torque-Style Prioritized Polling Loop
+                    // Fast Sensors (Every cycle): RPM, Speed, Throttle
+                    if (isPidSupported(0x0C)) {
+                        String rpmResp = sendRawCommand("010C", 600);
+                        parseRpm(rpmResp);
                     }
 
-                    // Periodic voltage every 6 cycles
-                    if (cycle % 6 == 0) {
-                        String voltResp = sendRawCommand("ATRV", 800);
+                    if (isPidSupported(0x0D)) {
+                        String speedResp = sendRawCommand("010D", 600);
+                        parseSpeed(speedResp);
+                    }
+
+                    if (isPidSupported(0x11)) {
+                        String tpsResp = sendRawCommand("0111", 600);
+                        parseThrottle(tpsResp);
+                    }
+
+                    // Medium Sensors (Every 4 cycles): Coolant, Engine Load
+                    if (cycle % 4 == 0) {
+                        if (isPidSupported(0x05)) {
+                            String ectResp = sendRawCommand("0105", 600);
+                            parseCoolant(ectResp);
+                        }
+                        if (isPidSupported(0x04)) {
+                            String loadResp = sendRawCommand("0104", 600);
+                            parseEngineLoad(loadResp);
+                        }
+                    }
+
+                    // Slow Sensors (Every 8 cycles): Battery voltage, IAT, MAP
+                    if (cycle % 8 == 0) {
+                        String voltResp = sendRawCommand("ATRV", 600);
                         parseVoltage(voltResp);
 
-                        // Intake Temp (010F)
-                        String iatResp = sendRawCommand("010F", 800);
-                        parseIntakeTemp(iatResp);
-
-                        // MAP (010B)
-                        String mapResp = sendRawCommand("010B", 800);
-                        parseMap(mapResp);
+                        if (isPidSupported(0x0F)) {
+                            String iatResp = sendRawCommand("010F", 600);
+                            parseIntakeTemp(iatResp);
+                        }
+                        if (isPidSupported(0x0B)) {
+                            String mapResp = sendRawCommand("010B", 600);
+                            parseMap(mapResp);
+                        }
                     }
 
                     notifyLiveData();
                     cycle++;
 
-                    Thread.sleep(150); // slight rest between loops
+                    Thread.sleep(40); // responsive polling rate like Torque
                 } catch (Exception e) {
                     Log.w(TAG, "Polling error", e);
                     try {
-                        Thread.sleep(500);
+                        Thread.sleep(300);
                     } catch (InterruptedException ignored) {}
                 }
             }
@@ -547,6 +574,66 @@ public class ObdManager {
         }
     }
 
+    private void parseSupportedPids(String raw) {
+        String clean = cleanHexResponse(raw, "41 00", "4100");
+        if (clean != null && clean.length() >= 8) {
+            try {
+                long mask = Long.parseLong(clean.substring(0, 8), 16);
+                supportedPids.clear();
+                for (int i = 0; i < 32; i++) {
+                    if (((mask >> (31 - i)) & 1L) == 1L) {
+                        supportedPids.set(i + 1);
+                    }
+                }
+                notifyLog("[PIDs] Sensor aktif terdeteksi: " + supportedPids.cardinality() + " PIDs.", false);
+            } catch (Exception ignored) {}
+        }
+    }
+
+    private void parseVin(String raw) {
+        if (raw == null || raw.contains("NO DATA")) return;
+        // Clean multiline frames
+        String[] lines = raw.split("[\r\n]+");
+        StringBuilder hexPayload = new StringBuilder();
+        for (String line : lines) {
+            String trimmed = line.trim();
+            // Skip CAN frame length header like 014
+            if (trimmed.matches("^[0-9A-Fa-f]{3}$")) continue;
+            // Strip index like "0:", "1:", "2:"
+            if (trimmed.contains(":")) {
+                int col = trimmed.indexOf(":");
+                trimmed = trimmed.substring(col + 1).trim();
+            }
+            String clean = trimmed.replaceAll("[^0-9A-Fa-f]", "");
+            int idx49 = clean.indexOf("4902");
+            if (idx49 != -1) {
+                // Skip 4902 and optional count byte
+                int start = idx49 + 4;
+                if (start + 2 <= clean.length()) start += 2; // skip message count byte
+                hexPayload.append(clean.substring(start));
+            } else if (hexPayload.length() > 0) {
+                hexPayload.append(clean);
+            }
+        }
+
+        if (hexPayload.length() >= 10) {
+            StringBuilder vinSb = new StringBuilder();
+            for (int i = 0; i + 1 < hexPayload.length(); i += 2) {
+                try {
+                    int ch = Integer.parseInt(hexPayload.substring(i, i + 2), 16);
+                    if (ch >= 32 && ch <= 126) {
+                        vinSb.append((char) ch);
+                    }
+                } catch (Exception ignored) {}
+            }
+            String extracted = vinSb.toString().trim();
+            if (extracted.length() >= 8) {
+                vehicleVin = extracted;
+                notifyLog("[VIN] Terdeteksi Nomor Rangka: " + vehicleVin, false);
+            }
+        }
+    }
+
     private String cleanHexResponse(String raw, String prefixWithSpace, String prefixWithoutSpace) {
         if (raw == null) return null;
         String s = raw.replace("\r", " ").replace("\n", " ").trim();
@@ -565,7 +652,7 @@ public class ObdManager {
 
     // DTC Operations
     public interface DtcCallback {
-        void onSuccess(List<String> dtcCodes);
+        void onSuccess(List<DtcDatabase.DtcInfo> dtcItems);
         void onError(String message);
     }
 
@@ -575,12 +662,29 @@ public class ObdManager {
             if (wasPolling) stopPollingLoop();
 
             try {
-                Thread.sleep(200);
-                String resp = sendRawCommand("03", 4000);
-                notifyLog("DTC Response: " + resp, false);
+                Thread.sleep(150);
+                // Mode 03: Confirmed DTCs
+                String resp03 = sendRawCommand("03", 4000);
+                notifyLog("DTC Confirmed (03): " + resp03, false);
+                List<String> confirmedCodes = parseDtcResponse(resp03, "43");
 
-                List<String> codes = parseDtcResponse(resp);
-                mainHandler.post(() -> callback.onSuccess(codes));
+                Thread.sleep(150);
+                // Mode 07: Pending DTCs (Torque Lite style!)
+                String resp07 = sendRawCommand("07", 3000);
+                notifyLog("DTC Pending (07): " + resp07, false);
+                List<String> pendingCodes = parseDtcResponse(resp07, "47");
+
+                List<DtcDatabase.DtcInfo> results = new ArrayList<>();
+                for (String code : confirmedCodes) {
+                    results.add(DtcDatabase.lookup(code, false));
+                }
+                for (String code : pendingCodes) {
+                    if (!confirmedCodes.contains(code)) {
+                        results.add(DtcDatabase.lookup(code, true));
+                    }
+                }
+
+                mainHandler.post(() -> callback.onSuccess(results));
             } catch (Exception e) {
                 mainHandler.post(() -> callback.onError("Gagal membaca DTC: " + e.getMessage()));
             } finally {
@@ -612,29 +716,43 @@ public class ObdManager {
         }).start();
     }
 
-    private List<String> parseDtcResponse(String raw) {
+    private List<String> parseDtcResponse(String raw, String prefix) {
         List<String> result = new ArrayList<>();
         if (raw == null || raw.contains("NO DATA") || raw.contains("UNABLE TO CONNECT")) {
             return result;
         }
 
-        // Clean lines
+        // Clean lines & reassemble ISO-TP CAN multi-frames (0:, 1:, 2:)
         String[] lines = raw.split("[\r\n]+");
+        StringBuilder payload = new StringBuilder();
         for (String line : lines) {
-            String clean = line.replaceAll("[^0-9A-Fa-f]", "");
-            int idx43 = clean.indexOf("43");
-            if (idx43 != -1) {
-                String hexData = clean.substring(idx43 + 2);
-                // Each DTC is 2 bytes (4 hex chars)
-                for (int i = 0; i + 3 < hexData.length(); i += 4) {
-                    String dtcHex = hexData.substring(i, i + 4);
-                    if (dtcHex.equals("0000")) continue;
-
-                    String code = decodeDtcCode(dtcHex);
-                    if (code != null && !result.contains(code)) {
-                        result.add(code);
-                    }
+            String trimmed = line.trim();
+            if (trimmed.matches("^[0-9A-Fa-f]{3}$")) continue; // Skip frame length like 00A
+            if (trimmed.contains(":")) {
+                int col = trimmed.indexOf(":");
+                trimmed = trimmed.substring(col + 1).trim();
+            }
+            String clean = trimmed.replaceAll("[^0-9A-Fa-f]", "");
+            int idx = clean.indexOf(prefix);
+            if (idx != -1) {
+                int start = idx + prefix.length();
+                if (start + 2 <= clean.length()) {
+                    start += 2; // skip message count byte
                 }
+                payload.append(clean.substring(start));
+            } else if (payload.length() > 0) {
+                payload.append(clean);
+            }
+        }
+
+        String hexData = payload.toString();
+        for (int i = 0; i + 3 < hexData.length(); i += 4) {
+            String dtcHex = hexData.substring(i, i + 4);
+            if (dtcHex.equals("0000")) continue;
+
+            String code = decodeDtcCode(dtcHex);
+            if (code != null && !result.contains(code)) {
+                result.add(code);
             }
         }
         return result;
