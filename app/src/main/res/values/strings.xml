@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">MotoCar OBD</string>
+    <string name="tab_connect">Koneksi</string>
+    <string name="tab_dashboard">Dashboard</string>
+    <string name="tab_diagnostics">DTC Scan</string>
+    <string name="tab_terminal">Terminal</string>
+
+    <string name="status_disconnected_label">Terputus</string>
+    <string name="status_connecting_label">Menghubungkan…</string>
+    <string name="status_connected_elm">Terhubung ke ELM327</string>
+    <string name="status_connected_ecu">Terhubung ke ECU</string>
+</resources>
